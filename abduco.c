@@ -116,6 +116,7 @@ typedef struct {
 	const char *session_name;
 	char host[255];
 	bool read_pty;
+	char scrollback_sock[PATH_MAX];
 } Server;
 
 static Server server = { .running = true, .exit_status = -1, .host = "@localhost" };
@@ -223,7 +224,7 @@ static void die(const char *s) {
 }
 
 static void usage(void) {
-	fprintf(stderr, "usage: abduco [-a|-A|-c|-n] [-p] [-r] [-q] [-l] [-f] [-e detachkey] name command\n");
+	fprintf(stderr, "usage: abduco [-a|-A|-c|-n] [-p] [-r] [-q] [-l] [-f] [-e detachkey] [-s scrollback-sock] name command\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -604,9 +605,10 @@ int main(int argc, char *argv[]) {
 	}
 
 	server.name = basename(argv[0]);
+	server.scrollback_sock[0] = '\0';
 	gethostname(server.host+1, sizeof(server.host) - 1);
 
-	while ((opt = getopt(argc, argv, "aAclne:fpqrv")) != -1) {
+	while ((opt = getopt(argc, argv, "aAclne:fpqrs:v")) != -1) {
 		switch (opt) {
 		case 'a':
 		case 'A':
@@ -632,6 +634,18 @@ int main(int argc, char *argv[]) {
 			break;
 		case 'r':
 			client.flags |= CLIENT_READONLY;
+			break;
+		case 's':
+			if (!realpath(".", server.scrollback_sock)) {
+				fprintf(stderr, "can't determine current directory: %s\n", strerror(errno));
+				return 2;
+			}
+			if (strlen(server.scrollback_sock) + strlen(optarg) + 2 > PATH_MAX) {
+				fprintf(stderr, "scrollback_sock path too long\n");
+				return 2;
+			}
+			strcat(server.scrollback_sock, "/");
+			strcat(server.scrollback_sock, optarg);
 			break;
 		case 'l':
 			client.flags |= CLIENT_LOWPRIORITY;

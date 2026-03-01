@@ -136,6 +136,62 @@ static void server_sigterm_handler(int sig) {
 	exit(EXIT_FAILURE); /* invoke atexit handler */
 }
 
+static void server_print_scrollback(const char *scrollback_sock, Client *c) {
+	int sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (sock == -1) {
+		debug("failed to open unix socket: %s\n", strerror(errno));
+		return;
+	}
+
+	struct sockaddr_un addr = { .sun_family = AF_UNIX };
+	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", scrollback_sock);
+	if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+		debug("failed to connect to %s: %s\n", scrollback_sock, strerror(errno));
+		goto cleanup;
+	}
+
+	char buf[1];
+
+	struct iovec iov = { .iov_base = &buf, .iov_len = sizeof(buf) };
+	char cmsg_buf[CMSG_SPACE(sizeof(int))];
+	struct msghdr msg = {
+		.msg_iov = &iov,
+		.msg_iovlen = 1,
+		.msg_control = cmsg_buf,
+		.msg_controllen = sizeof(cmsg_buf)
+	};
+
+	int scrlb_fd = -1;
+
+	if (recvmsg(sock, &msg, 0) == -1)
+		goto cleanup;
+
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	if (cmsg->cmsg_level != SOL_SOCKET
+		|| cmsg->cmsg_type != SCM_RIGHTS
+		|| cmsg->cmsg_len != CMSG_LEN(sizeof(int)))
+		goto cleanup;
+
+	memcpy(&scrlb_fd, CMSG_DATA(cmsg), sizeof(int));
+
+	Packet pkt = { .type = MSG_CONTENT };
+
+	ssize_t rlen;
+	while ((rlen = read(scrlb_fd, pkt.u.msg, sizeof(pkt.u.msg))) > 0) {
+		pkt.len = rlen;
+		server_send_packet(c, &pkt);
+	}
+
+	// no further data is handled by the scrollback buffer until the unix
+	// socket is closed. this is the time to attach the client to receive
+	// any future data. since this code is blocking the server loop, we're
+	// done.
+	close(scrlb_fd);
+
+cleanup:
+	close(sock);
+}
+
 static Client *server_accept_client(void) {
 	int newfd = accept(server.socket, NULL, NULL);
 	if (newfd == -1 || server_set_socket_non_blocking(newfd) == -1)
@@ -157,6 +213,8 @@ static Client *server_accept_client(void) {
 		.u.l = getpid(),
 	};
 	server_send_packet(c, &pkt);
+	if (server.scrollback_sock[0])
+		server_print_scrollback(server.scrollback_sock, c);
 
 	return c;
 error:

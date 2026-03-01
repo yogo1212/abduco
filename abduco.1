@@ -102,6 +102,10 @@ which is specified as ^\\ i.e. Ctrl is represented as a caret
 .It Fl f
 Force creation of session when there is an already terminated session of the same name,
 after showing its exit status.
+.It Fl s Ar scrollback_fd_socket
+A unix socket to send the writing end of a pipe through. This can be used for receiving the scrollback
+buffer from when a new client attaches. Wait for the accepted socket to be closed before resuming
+regular pass-through behavior.
 .It Fl l
 Attach with the lowest priority, meaning this client will be the last to control the size.
 .It Fl p
